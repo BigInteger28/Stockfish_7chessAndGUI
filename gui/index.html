@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stockfish pawn7 GUI</title>
+<style>
+  :root {
+    --bg: #f4f2ee; --panel: #fff; --text: #222; --muted: #6b6b6b; --border: #d6d2ca;
+    --light: #f0d9b5; --dark: #b58863; --sel: #f6f669; --target: rgba(20,120,60,.55);
+    --last: rgba(255,210,0,.45); --accent: #2f6fdb; --danger: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1e1f22; --panel: #2a2c30; --text: #e8e8e8; --muted: #9a9a9a; --border: #43464c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; }
+  h1 { font-size: 16px; margin: 0; }
+  header { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 12px; align-items: baseline; }
+  header .sub { color: var(--muted); }
+  main { display: flex; flex-wrap: wrap; gap: 16px; padding: 16px; align-items: flex-start; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  #boardwrap { width: min(92vw, 600px); }
+  #board { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); grid-template-rows: repeat(8, minmax(0, 1fr)); aspect-ratio: 1; border: 2px solid #5a4630; user-select: none; }
+  .sq { position: relative; min-width: 0; min-height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center;
+        font-size: min(9vw, 56px); line-height: 1; cursor: pointer; }
+  .sq.l { background: var(--light); } .sq.d { background: var(--dark); }
+  .sq.last::after { content: ""; position: absolute; inset: 0; background: var(--last); }
+  .sq.sel { background: var(--sel); }
+  .sq.tgt::before { content: ""; position: absolute; width: 28%; height: 28%; border-radius: 50%; background: var(--target); z-index: 2; }
+  .sq.tgt.occ::before { width: 90%; height: 90%; background: none; border: 4px solid var(--target); }
+  .sq.chk { box-shadow: inset 0 0 0 4px var(--danger); }
+  .sq .coord { position: absolute; font-size: 10px; opacity: .7; color: #333; z-index: 3; }
+  .sq .coord.f { right: 2px; bottom: 1px; } .sq .coord.r { left: 2px; top: 1px; }
+  .pc { position: relative; z-index: 1; }
+  .pc.w { color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000, 0 0 3px #000, 0 0 3px #000; }
+  .pc.b { color: #111; text-shadow: 0 0 1px #888; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
+           background: var(--panel); color: var(--text); cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.stop { background: var(--danger); border-color: var(--danger); color: #fff; }
+  #status { margin-top: 8px; min-height: 20px; font-weight: 600; }
+  #status.err { color: var(--danger); }
+  #side { flex: 1 1 340px; min-width: 300px; max-width: 520px; display: flex; flex-direction: column; gap: 12px; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+  label { color: var(--muted); }
+  input[type=number], input[type=text] { font: inherit; padding: 4px 6px; border: 1px solid var(--border);
+        border-radius: 6px; background: var(--bg); color: var(--text); }
+  input[type=number] { width: 90px; }
+  #fen { width: 100%; font-family: ui-monospace, monospace; font-size: 12px; }
+  #analysis .line { font-family: ui-monospace, monospace; font-size: 12px; padding: 3px 0; border-bottom: 1px dashed var(--border); }
+  #analysis .sc { display: inline-block; min-width: 56px; font-weight: 700; }
+  #analysis .meta { color: var(--muted); }
+  #moves { font-family: ui-monospace, monospace; font-size: 12px; max-height: 120px; overflow: auto; }
+  details > summary { cursor: pointer; font-weight: 600; }
+  #opts { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; margin-top: 8px; max-height: 360px; overflow: auto; }
+  #opts input[type=text] { width: 190px; } #opts input[type=number] { width: 110px; }
+  #palette { display: none; margin-top: 10px; }
+  #palette.on { display: block; }
+  #palette .pb { font-size: 28px; padding: 2px 8px; }
+  #palette .pb.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  #dlg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 10; }
+  #dlg.on { display: flex; }
+  #dlg .box { background: var(--panel); padding: 16px; border-radius: 10px; min-width: 260px; }
+  #dlg .choices { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  #dlg .choices button { font-size: 34px; padding: 4px 12px; }
+  #dlg small { display: block; font-size: 11px; color: var(--muted); }
+  #photo { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: flex-start; justify-content: center; z-index: 11; overflow: auto; padding: 16px; }
+  #photo.on { display: flex; }
+  #photo .box { background: var(--panel); padding: 16px; border-radius: 10px; width: min(720px, 100%); }
+  #pcanvas { max-width: 100%; border: 1px solid var(--border); cursor: crosshair; display: block; margin: 8px 0; background: #888; }
+  #pInfo { margin-top: 8px; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header><h1>Stockfish pawn7 GUI</h1><span class="sub">pion promoveert op de 7de rij (N/B/R) en op de 8ste (ook dame)</span></header>
+<main>
+  <div id="boardwrap">
+    <div class="panel">
+      <div id="board"></div>
+      <div id="status"></div>
+      <div class="bar">
+        <button id="bPlay" class="primary">Speel zet</button>
+        <button id="bAnalyse">Analyseer</button>
+        <button id="bStop" class="stop" disabled>Stop</button>
+        <button id="bBack">Zet terug</button>
+        <button id="bEdit">Bewerk stelling</button>
+        <button id="bPhoto">Foto → stelling</button>
+        <button id="bFlip">Draai bord</button>
+        <button id="bNew">Nieuw spel</button>
+      </div>
+      <div id="palette">
+        <div class="row" id="pbtns"></div>
+        <div class="row">
+          <label>Aan zet</label>
+          <select id="eTurn"><option value="w">wit</option><option value="b">zwart</option></select>
+          <label><input type="checkbox" id="cK"> K</label><label><input type="checkbox" id="cQ"> Q</label>
+          <label><input type="checkbox" id="ck"> k</label><label><input type="checkbox" id="cq"> q</label>
+        </div>
+        <div class="bar">
+          <button id="eApply" class="primary">Toepassen</button>
+          <button id="eClear">Leeg bord</button>
+          <button id="eStart">Beginstelling</button>
+          <button id="eCancel">Annuleren</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="side">
+    <div class="panel" id="analysis"><strong>Analyse</strong><div id="alines" style="margin-top:6px;color:var(--muted)">Nog geen analyse.</div></div>
+    <div class="panel">
+      <div class="row">
+        <label for="depth">Diepte</label><input type="number" id="depth" min="0" max="100" value="0">
+        <label for="mt">Bedenktijd (ms)</label><input type="number" id="mt" min="50" step="100" value="1000">
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="editMoves" checked> EditMoves</label>
+        <span style="color:var(--muted);font-size:12px">aan: eigen zetten zonder antwoord van de engine; uit: de engine antwoordt automatisch (Speel zet werkt altijd)</span>
+      </div>
+      <div class="muted" style="color:var(--muted);font-size:12px">Diepte 0 = geen limiet: Analyseer loopt tot Stop, Speel zet gebruikt de bedenktijd.</div>
+    </div>
+
+
+    <div class="panel">
+      <strong>Stelling (FEN)</strong>
+      <div class="row"><input type="text" id="fen"></div>
+      <div class="bar"><button id="bSetFen">Laad FEN</button><button id="bCopy">Kopieer</button></div>
+      <div style="margin-top:8px"><strong>Zetten</strong><div id="moves"></div></div>
+    </div>
+
+    <div class="panel">
+      <details open><summary>Engine-instellingen</summary><div id="opts">Laden…</div></details>
+    </div>
+  </div>
+</main>
+
+<div id="photo"><div class="box">
+  <strong>Foto → stelling</strong>
+  <div style="color:var(--muted);font-size:12px;margin-top:4px">Plak een screenshot met Ctrl+V (of kies een bestand). Sleep daarna een vierkant precies over de 64 velden (zonder coördinaten). De rasterlijnen helpen bij het uitlijnen.</div>
+  <input type="file" id="pfile" accept="image/*" style="margin-top:8px">
+  <canvas id="pcanvas" width="10" height="10"></canvas>
+  <div class="row"><label><input type="checkbox" id="pFlip"> Bord 180° gedraaid (rij 1 bovenaan, H links)</label></div>
+  <div class="row"><label>Aan zet</label><select id="pTurn"><option value="w">wit</option><option value="b">zwart</option></select>
+    <label>Rokade:</label>
+    <label><input type="checkbox" id="pK"> K</label><label><input type="checkbox" id="pQ"> Q</label>
+    <label><input type="checkbox" id="pk"> k</label><label><input type="checkbox" id="pq"> q</label></div>
+  <div class="row"><label><input type="checkbox" id="pStart"> Dit is de beginstelling (alleen stukken leren)</label></div>
+  <div class="bar"><button id="pGo" class="primary">Herken</button><button id="pClose">Sluiten</button><button id="pReset">Geleerde stukken wissen</button></div>
+  <div id="pInfo"></div>
+</div></div>
+
+<div id="dlg"><div class="box"><strong>Promotie</strong><div class="choices" id="dchoices"></div></div></div>
+
+<script>
+const GLYPH = {K:'♚',Q:'♛',R:'♜',B:'♝',N:'♞',P:'♟'};
+const $ = id => document.getElementById(id);
+const FILES = 'abcdefgh';
+
+let startFen = '';
+let S = { fen: '', moves: [], check: false, board: [], turn: 'w' };
+let history = [];       // eerdere toestanden {fen, last}
+let uciMoves = [];      // gespeelde zetten (voor weergave)
+let last = null;        // laatste zet {from,to}
+let flipped = false;
+let selected = null;
+let editing = false;
+let tool = null;        // 'K','q','x',...
+let busy = false;       // engine rekent
+let mode = null, sid = 0, poll = null, handled = true;
+let promoMoves = null;
+let unknownSet = new Set();
+let pendingLearn = null;
+
+function api(path, body) {
+  const opt = body === undefined ? {} : { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) };
+  return fetch(path, opt).then(r => r.json().then(j => { if (!r.ok) throw new Error(j.error || r.status); return j; }));
+}
+function setStatus(t, err) { const s = $('status'); s.textContent = t || ''; s.className = err ? 'err' : ''; }
+
+// ---------------------------------------------------------------- FEN
+function parseFen(fen) {
+  const p = fen.split(' '); const board = new Array(64).fill('');
+  p[0].split('/').forEach((row, r) => { let f = 0;
+    for (const ch of row) { if (/\d/.test(ch)) f += +ch; else { board[r*8+f] = ch; f++; } } });
+  return { board, turn: p[1] || 'w', castling: p[2] || '-', ep: p[3] || '-', half: p[4] || '0', full: p[5] || '1' };
+}
+function boardToFen(board) {
+  return Array.from({length: 8}, (_, r) => { let s = '', n = 0;
+    for (let f = 0; f < 8; f++) { const c = board[r*8+f]; if (!c) n++; else { if (n) s += n; n = 0; s += c; } }
+    return s + (n || ''); }).join('/');
+}
+const sqName = i => FILES[i % 8] + (8 - Math.floor(i / 8));
+const sqIdx = n => (8 - +n[1]) * 8 + FILES.indexOf(n[0]);
+const isWhite = c => c === c.toUpperCase();
+
+// ---------------------------------------------------------------- toestand
+function loadState(fen, move, keepHist) {
+  return api('/api/state', { fen, move }).then(st => {
+    S = Object.assign(st, parseFen(st.fen));
+    selected = null; render();
+    $('fen').value = S.fen;
+    if (!S.moves.length) setStatus(S.check ? 'Schaakmat — ' + (S.turn === 'w' ? 'zwart' : 'wit') + ' wint' : 'Pat — remise');
+    else setStatus((S.turn === 'w' ? 'Wit' : 'Zwart') + ' aan zet' + (S.check ? ' (schaak)' : ''));
+    return st;
+  });
+}
+function doMove(m) {
+  const prev = { fen: S.fen, last, uci: uciMoves.length };
+  return loadState(S.fen, m).then(() => {
+    history.push(prev); uciMoves.push(m);
+    last = { from: sqIdx(m.slice(0,2)), to: sqIdx(m.slice(2,4)) };
+    render(); renderMoves();
+  }).catch(e => setStatus(e.message, true));
+}
+
+// ---------------------------------------------------------------- bord tekenen
+function render() {
+  const b = $('board'); b.innerHTML = '';
+  const kingSq = S.check ? S.board.findIndex(c => c === (S.turn === 'w' ? 'K' : 'k')) : -1;
+  const targets = selected === null ? [] : S.moves.filter(m => sqIdx(m.slice(0,2)) === selected).map(m => sqIdx(m.slice(2,4)));
+  for (let k = 0; k < 64; k++) {
+    const i = flipped ? 63 - k : k; const r = Math.floor(i / 8), f = i % 8;
+    const d = document.createElement('div');
+    d.className = 'sq ' + ((r + f) % 2 ? 'd' : 'l');
+    if (last && (i === last.from || i === last.to)) d.classList.add('last');
+    if (i === selected) d.classList.add('sel');
+    if (targets.includes(i)) { d.classList.add('tgt'); if (S.board[i]) d.classList.add('occ'); }
+    if (i === kingSq || (editing && unknownSet.has(i))) d.classList.add('chk');
+    const c = S.board[i];
+    if (c) { const s = document.createElement('span'); s.className = 'pc ' + (isWhite(c) ? 'w' : 'b');
+      s.textContent = GLYPH[c.toUpperCase()] + '︎'; d.appendChild(s); }
+    if (f === (flipped ? 7 : 0)) { const e = document.createElement('span'); e.className = 'coord r'; e.textContent = 8 - r; d.appendChild(e); }
+    if (r === (flipped ? 0 : 7)) { const e = document.createElement('span'); e.className = 'coord f'; e.textContent = FILES[f]; d.appendChild(e); }
+    d.onclick = () => clickSq(i);
+    b.appendChild(d);
+  }
+  updateButtons();
+}
+function renderMoves() {
+  $('moves').textContent = uciMoves.map((m, i) => (i % 2 ? '' : (i/2 + 1) + '. ') + m).join(' ');
+}
+function updateButtons() {
+  $('bPlay').disabled = busy || editing || !S.moves.length;
+  $('bAnalyse').disabled = busy || editing || !S.moves.length;
+  $('bStop').disabled = !busy;
+  $('bBack').disabled = busy || editing || !history.length;
+  $('bEdit').disabled = busy || editing;
+  $('bPhoto').disabled = busy || editing;
+  $('bNew').disabled = busy;
+  $('bSetFen').disabled = busy;
+}
+
+// ---------------------------------------------------------------- klikken
+function clickSq(i) {
+  if (editing) {
+    if (!tool) return;
+    S.board[i] = tool === 'x' ? '' : tool; render(); return;
+  }
+  if (busy && mode === 'play') return;
+  const c = S.board[i];
+  const own = c && (isWhite(c) === (S.turn === 'w'));
+  if (selected !== null) {
+    const cand = S.moves.filter(m => sqIdx(m.slice(0,2)) === selected && sqIdx(m.slice(2,4)) === i);
+    if (cand.length === 1) { moveFromUI(cand[0]); return; }
+    if (cand.length > 1) { askPromotion(cand); return; }
+  }
+  selected = own && i !== selected ? i : null; render();
+}
+function moveFromUI(m) {
+  if (busy && mode === 'analyse') {
+    stopped = true;
+    stopSearch().then(() => doMove(m)).then(() => { stopped = false; analyseOn = true; if (S.moves.length) startSearch('analyse'); });
+  } else {
+    doMove(m).then(() => {
+      if (!$('editMoves').checked && S.moves.length && !busy) { analyseOn = false; stopped = false; startSearch('play'); }
+    });
+  }
+}
+function askPromotion(cand) {
+  const ch = $('dchoices'); ch.innerHTML = '';
+  const white = S.turn === 'w';
+  const toRank = cand[0][3];
+  const order = ['', 'q', 'r', 'b', 'n'];
+  order.forEach(sfx => {
+    const m = cand.find(x => x.slice(4) === sfx); if (!m) return;
+    const btn = document.createElement('button');
+    const p = sfx === '' ? 'P' : sfx.toUpperCase();
+    btn.innerHTML = '<span class="pc ' + (white ? 'w' : 'b') + '">' + GLYPH[p] + '︎</span>' +
+      '<small>' + (sfx === '' ? 'blijft pion' : { q:'dame', r:'toren', b:'loper', n:'paard' }[sfx]) + '</small>';
+    btn.onclick = () => { $('dlg').classList.remove('on'); moveFromUI(m); };
+    ch.appendChild(btn);
+  });
+  $('dlg').classList.add('on');
+}
+$('dlg').onclick = e => { if (e.target.id === 'dlg') $('dlg').classList.remove('on'); };
+
+// ---------------------------------------------------------------- engine
+function startSearch(m) {
+  const depth = +$('depth').value || 0, movetime = +$('mt').value || 1000;
+  mode = m; busy = true; handled = false; selected = null; render();
+  setStatus(m === 'play' ? 'Engine denkt…' : 'Analyseren…');
+  return api('/api/go', { fen: S.fen, mode: m, depth, movetime }).then(r => {
+    sid = r.sid; clearInterval(poll); poll = setInterval(pollStatus, 200);
+  }).catch(e => { busy = false; setStatus(e.message, true); render(); });
+}
+function stopSearch() {
+  return api('/api/stop', {}).catch(() => {}).then(() => pollStatus());
+}
+let analyseOn = false;
+
+function fmtScore(info) {
+  // score is vanuit de zijde aan zet; toon vanuit wit
+  const sign = S.turn === 'w' ? 1 : -1;
+  if (info.scoreType === 'mate') { const v = info.score * sign; return (v > 0 ? '+' : '-') + 'M' + Math.abs(info.score); }
+  const v = info.score * sign / 100; return (v > 0 ? '+' : '') + v.toFixed(2);
+}
+function pollStatus() {
+  return api('/api/status').then(st => {
+    if (st.sid !== sid) return;
+    const al = $('alines');
+    if (st.infos.length) {
+      al.innerHTML = '';
+      st.infos.forEach(i => {
+        const d = document.createElement('div'); d.className = 'line';
+        d.innerHTML = '<span class="sc">' + fmtScore(i) + '</span><span class="meta">d' + i.depth +
+          (i.seldepth ? '/' + i.seldepth : '') + ' · ' + (i.nodes/1000|0) + 'k · ' + (i.nps/1000|0) + 'k/s</span><br>' + i.pv.slice(0, 14).join(' ');
+        al.appendChild(d);
+      });
+    }
+    if (!st.searching) {
+      clearInterval(poll); busy = false;
+      if (!handled) {
+        handled = true;
+        if (mode === 'play' && st.best && st.best !== '(none)' && !stopped) { doMove(st.best); }
+        else if (!stopped) setStatus('Klaar' + (st.best && st.best !== '(none)' ? ' — beste zet: ' + st.best : ''));
+        else setStatus('Gestopt');
+      }
+      stopped = false; analyseOn = false; render();
+    }
+  }).catch(() => {});
+}
+let stopped = false;
+
+$('bPlay').onclick = () => { analyseOn = false; stopped = false; startSearch('play'); };
+$('bAnalyse').onclick = () => { analyseOn = true; stopped = false; startSearch('analyse'); };
+$('bStop').onclick = () => { stopped = true; analyseOn = false; stopSearch(); };
+$('bBack').onclick = () => {
+  const p = history.pop(); if (!p) return;
+  uciMoves.length = p.uci; last = p.last;
+  loadState(p.fen).then(renderMoves).catch(e => setStatus(e.message, true));
+};
+$('bFlip').onclick = () => { flipped = !flipped; render(); };
+$('bNew').onclick = () => newGame(startFen);
+function newGame(fen) {
+  history = []; uciMoves = []; last = null;
+  loadState(fen).then(renderMoves).catch(e => setStatus(e.message, true));
+}
+$('bSetFen').onclick = () => newGame($('fen').value.trim());
+$('bCopy').onclick = () => navigator.clipboard && navigator.clipboard.writeText($('fen').value);
+
+// ---------------------------------------------------------------- bewerken
+const PIECES = ['K','Q','R','B','N','P','k','q','r','b','n','p'];
+(function buildPalette() {
+  const box = $('pbtns');
+  PIECES.forEach(p => {
+    const b = document.createElement('button'); b.className = 'pb';
+    b.innerHTML = '<span class="pc ' + (isWhite(p) ? 'w' : 'b') + '">' + GLYPH[p.toUpperCase()] + '︎</span>';
+    b.onclick = () => selectTool(p); b.dataset.t = p; box.appendChild(b);
+  });
+  const x = document.createElement('button'); x.className = 'pb'; x.textContent = '✕'; x.title = 'wis';
+  x.dataset.t = 'x'; x.onclick = () => selectTool('x'); box.appendChild(x);
+})();
+function selectTool(t) { tool = t; document.querySelectorAll('#pbtns button').forEach(b => b.classList.toggle('on', b.dataset.t === t)); }
+function setEditing(on) {
+  editing = on; $('palette').classList.toggle('on', on);
+  if (on) {
+    $('eTurn').value = S.turn;
+    for (const c of 'KQkq') $('c' + c).checked = S.castling.includes(c);
+    selected = null; tool = null; selectTool('P'); setStatus('Klik op een vakje om te plaatsen; ✕ wist.');
+  }
+  render();
+}
+$('bEdit').onclick = () => setEditing(true);
+$('eCancel').onclick = () => { pendingLearn = null; unknownSet = new Set(); setEditing(false); loadState(S.fen); };
+$('eClear').onclick = () => { S.board = new Array(64).fill(''); render(); };
+$('eStart').onclick = () => { S.board = parseFen(startFen).board; render(); };
+$('eApply').onclick = () => {
+  let c = ''; for (const k of 'KQkq') if ($('c' + k).checked) c += k;
+  const fen = boardToFen(S.board) + ' ' + $('eTurn').value + ' ' + (c || '-') + ' - 0 1';
+  const labels = S.board.slice();
+  api('/api/state', { fen }).then(() => {
+      if (pendingLearn) { const n = learnSquares(labels, pendingLearn.desc, false); pendingLearn = null; if (n) console.log('geleerd:', n); }
+      unknownSet = new Set(); editing = false; $('palette').classList.remove('on'); newGame(fen); })
+    .catch(e => setStatus('Ongeldige stelling: ' + e.message, true));
+};
+
+
+// ---------------------------------------------------------------- foto -> stelling
+const TPL_KEY = 'fodTemplates', RECT_KEY = 'fodRect';
+const MAX_TPL = 6, UNKNOWN_DIST = 1800, EMPTY_VAR = 150;
+let tpl = {};
+try { tpl = JSON.parse(localStorage.getItem(TPL_KEY)) || {}; } catch (e) {}
+let photo = { img: null, rect: null };   // rect: fracties van de afbeelding {x,y,w}
+const pcv = $('pcanvas'), pctx = pcv.getContext('2d');
+const tcv = document.createElement('canvas'); tcv.width = tcv.height = 16;
+const tctx = tcv.getContext('2d', { willReadFrequently: true });
+const bgOf = ti => ((Math.floor(ti / 8) + ti % 8) % 2 ? 'd' : 'l');
+function tplCount() { return Object.values(tpl).reduce((a, v) => a + v.length, 0); }
+function saveTpl() { try { localStorage.setItem(TPL_KEY, JSON.stringify(tpl)); } catch (e) { $('pInfo').textContent = 'Opslaan van sjablonen mislukt.'; } }
+function info(t) { $('pInfo').textContent = t; }
+
+function drawPhoto() {
+  const img = photo.img; if (!img) return;
+  const sc = Math.min(1, 680 / img.naturalWidth);
+  pcv.width = Math.round(img.naturalWidth * sc); pcv.height = Math.round(img.naturalHeight * sc);
+  pctx.drawImage(img, 0, 0, pcv.width, pcv.height);
+  const r = photo.rect; if (!r) return;
+  const x = r.x * pcv.width, y = r.y * pcv.height, w = r.w * pcv.width;
+  pctx.strokeStyle = '#e0197d'; pctx.lineWidth = 1.5; pctx.strokeRect(x, y, w, w);
+  pctx.strokeStyle = 'rgba(224,25,125,.6)'; pctx.lineWidth = 1; pctx.beginPath();
+  for (let k = 1; k < 8; k++) { pctx.moveTo(x + w * k / 8, y); pctx.lineTo(x + w * k / 8, y + w); pctx.moveTo(x, y + w * k / 8); pctx.lineTo(x + w, y + w * k / 8); }
+  pctx.stroke();
+}
+function setPhotoImage(src) {
+  const img = new Image();
+  img.onload = () => {
+    photo.img = img;
+    try { const r = JSON.parse(localStorage.getItem(RECT_KEY)); if (r && r.w) photo.rect = r; } catch (e) {}
+    drawPhoto(); info('Sleep een vierkant over de 64 velden en druk op Herken.');
+  };
+  img.src = src;
+}
+let dragStart = null;
+pcv.onmousedown = e => { const b = pcv.getBoundingClientRect(); dragStart = { x: (e.clientX - b.left) / b.width, y: (e.clientY - b.top) / b.height }; };
+pcv.onmousemove = e => {
+  if (!dragStart || !photo.img) return;
+  const b = pcv.getBoundingClientRect(); const cx = (e.clientX - b.left) / b.width, cy = (e.clientY - b.top) / b.height;
+  const pxW = pcv.width, pxH = pcv.height;
+  const dxp = (cx - dragStart.x) * pxW, dyp = (cy - dragStart.y) * pxH;
+  const side = Math.max(Math.abs(dxp), Math.abs(dyp));
+  const x0 = dxp >= 0 ? dragStart.x * pxW : dragStart.x * pxW - side, y0 = dyp >= 0 ? dragStart.y * pxH : dragStart.y * pxH - side;
+  photo.rect = { x: x0 / pxW, y: y0 / pxH, w: side / pxW }; drawPhoto();
+};
+window.addEventListener('mouseup', () => {
+  if (dragStart && photo.rect) { try { localStorage.setItem(RECT_KEY, JSON.stringify(photo.rect)); } catch (e) {} }
+  dragStart = null;
+});
+document.addEventListener('paste', e => {
+  if (!$('photo').classList.contains('on')) return;
+  for (const it of e.clipboardData.items) if (it.type.startsWith('image/')) { setPhotoImage(URL.createObjectURL(it.getAsFile())); e.preventDefault(); return; }
+});
+$('pfile').onchange = e => { const f = e.target.files[0]; if (f) setPhotoImage(URL.createObjectURL(f)); };
+$('bPhoto').onclick = () => { $('photo').classList.add('on'); info('Opgeslagen sjablonen: ' + tplCount() + '. Plak nu een screenshot (Ctrl+V).'); };
+$('pClose').onclick = () => $('photo').classList.remove('on');
+$('pReset').onclick = () => { if (confirm('Alle geleerde stukken wissen?')) { tpl = {}; saveTpl(); info('Sjablonen gewist.'); } };
+
+function describe(r, c) {
+  const img = photo.img, R = photo.rect;
+  const W = img.naturalWidth, H = img.naturalHeight;
+  const sw = R.w * W / 8, x = R.x * W + c * sw, y = R.y * H + r * sw;
+  tctx.imageSmoothingQuality = 'high';
+  tctx.drawImage(img, x + 0.1 * sw, y + 0.1 * sw, 0.8 * sw, 0.8 * sw, 0, 0, 16, 16);
+  const d = tctx.getImageData(0, 0, 16, 16).data, out = [];
+  for (let p = 0; p < 1024; p += 4) out.push(d[p], d[p + 1], d[p + 2]);
+  return out;
+}
+function variance(d) {
+  let sum = 0, sq = 0; const n = d.length / 3;
+  for (let p = 0; p < d.length; p += 3) { const g = (d[p] + d[p + 1] + d[p + 2]) / 3; sum += g; sq += g * g; }
+  const m = sum / n; return sq / n - m * m;
+}
+function dist(a, b) { let s = 0; for (let k = 0; k < a.length; k++) { const t = a[k] - b[k]; s += t * t; } return s / a.length; }
+function classify(d, ti) {
+  if (variance(d) < EMPTY_VAR) return { p: '' };
+  let best = Infinity, bp = null; const bg = bgOf(ti);
+  for (const p of PIECES) for (const t of (tpl[p + bg] || [])) { const v = dist(d, t); if (v < best) { best = v; bp = p; } }
+  return best <= UNKNOWN_DIST ? { p: bp, dist: best } : { p: '?', dist: best };
+}
+function learnSquares(labels, desc, force) {
+  let n = 0;
+  labels.forEach((lab, ti) => {
+    if (!lab || !desc[ti]) return;
+    const key = lab + bgOf(ti), arr = tpl[key] || (tpl[key] = []);
+    if (!force && arr.some(t => dist(t, desc[ti]) < 300)) return;
+    arr.push(desc[ti]); if (arr.length > MAX_TPL) arr.shift(); n++;
+  });
+  saveTpl(); return n;
+}
+$('pGo').onclick = () => {
+  if (!photo.img || !photo.rect) { info('Plak eerst een screenshot en sleep een vierkant over het bord.'); return; }
+  const flip = $('pFlip').checked, desc = new Array(64), guess = new Array(64).fill(''), unk = new Set();
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const ti = flip ? (7 - r) * 8 + (7 - c) : r * 8 + c;
+    desc[ti] = describe(r, c);
+  }
+  if ($('pStart').checked) {
+    const labels = parseFen(startFen).board;
+    const n = learnSquares(labels, desc, false);
+    info('Beginstelling geleerd: ' + n + ' nieuwe sjablonen (totaal ' + tplCount() + '). Plak nu een gewone stelling.');
+    return;
+  }
+  for (let ti = 0; ti < 64; ti++) { const c = classify(desc[ti], ti); if (c.p === '?') { unk.add(ti); guess[ti] = ''; } else guess[ti] = c.p; }
+  let cs = ''; for (const k of 'KQkq') if ($('p' + k).checked) cs += k;
+  S.board = guess.slice(); S.turn = $('pTurn').value; S.castling = cs || '-';
+  unknownSet = unk; pendingLearn = { desc };
+  $('photo').classList.remove('on');
+  setEditing(true);
+  setStatus(unk.size ? unk.size + ' onbekend(e) vakje(s) rood omlijnd: vul ze in met het palet. Controleer daarna alles en druk op Toepassen (dan leert de GUI ervan).'
+                     : 'Herkend. Controleer de stelling en druk op Toepassen.');
+};
+
+// ---------------------------------------------------------------- opties
+function buildOptions(list, saved) {
+  const box = $('opts'); box.innerHTML = '';
+  list.forEach(o => {
+    const l = document.createElement('label'); l.textContent = o.name; box.appendChild(l);
+    let el;
+    const cur = saved[o.name] !== undefined ? saved[o.name] : o.default;
+    const send = v => api('/api/setoption', { name: o.name, value: v })
+      .then(() => setStatus('Ingesteld: ' + o.name))
+      .catch(e => setStatus(e.message, true));
+    if (o.type === 'check') {
+      el = document.createElement('input'); el.type = 'checkbox'; el.checked = String(cur) === 'true';
+      el.onchange = () => send(el.checked ? 'true' : 'false');
+    } else if (o.type === 'spin') {
+      el = document.createElement('input'); el.type = 'number'; el.value = cur;
+      if (o.min !== null) el.min = o.min; if (o.max !== null) el.max = o.max;
+      el.onchange = () => send(el.value);
+    } else if (o.type === 'combo') {
+      el = document.createElement('select');
+      o.vars.forEach(v => { const op = document.createElement('option'); op.textContent = v; el.appendChild(op); });
+      el.value = cur; el.onchange = () => send(el.value);
+    } else if (o.type === 'button') {
+      el = document.createElement('button'); el.textContent = 'Uitvoeren'; el.onclick = () => send('');
+    } else {
+      el = document.createElement('input'); el.type = 'text'; el.value = cur;
+      el.onchange = () => send(el.value);
+    }
+    box.appendChild(el);
+  });
+}
+
+try { $('editMoves').checked = localStorage.getItem('editMoves') !== '0'; } catch (e) {}
+$('editMoves').onchange = () => { try { localStorage.setItem('editMoves', $('editMoves').checked ? '1' : '0'); } catch (e) {} };
+api('/api/options').then(r => { startFen = r.startFen; buildOptions(r.options, r.saved); newGame(startFen); })
+  .catch(e => setStatus('Kan engine niet bereiken: ' + e.message, true));
+</script>
+</body>
+</html>
